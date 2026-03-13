@@ -3,15 +3,10 @@ pipeline {
 
     // ─── PARAMETERS ───────────────────────────────────────────────────────────
     parameters {
-        string(
-            name: 'APP_FOLDER',
-            defaultValue: 'app',
-            description: 'Folder to build from (e.g. app)'
-        )
-        booleanParam(
-            name: 'FORCE_BUILD',
-            defaultValue: false,
-            description: 'Force build even if no changes in app folder'
+        choice(
+            name: 'FOLDER',
+            choices: ['app', 'dev'],
+            description: 'Select which folder to build and push to AWS ECR'
         )
     }
 
@@ -21,11 +16,11 @@ pipeline {
         AWS_REGION         = "us-east-1"                          // ← change to your region
         AWS_ACCOUNT_ID     = "123456789012"                       // ← your AWS account ID
 
-        // ── ECR CONFIG ─────────────────────────────────────────────────────────
-        ECR_REPO_NAME      = "your-app-name"                      // ← your ECR repo name
+        // ── ECR CONFIG — image name will be based on selected folder ───────────
+        ECR_REPO_NAME      = "${params.FOLDER}-app"               // app-app or dev-app
         ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         IMAGE_URI          = "${ECR_REGISTRY}/${ECR_REPO_NAME}"
-        IMAGE_TAG          = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+        IMAGE_TAG          = "${params.FOLDER}-${env.BUILD_NUMBER}"
     }
 
     stages {
@@ -38,43 +33,22 @@ pipeline {
             }
         }
 
-        // ─── 2. CHECK IF APP FOLDER HAS CHANGES ──────────────────────────────
-        stage('Check App Folder Changes') {
+        // ─── 2. CONFIRM SELECTED FOLDER ───────────────────────────────────────
+        stage('Selected Folder Info') {
             steps {
-                script {
-                    echo "Checking for changes in '${params.APP_FOLDER}/' folder..."
-
-                    def changedFiles = sh(
-                        script: "git diff --name-only HEAD~1 HEAD || echo 'first-commit'",
-                        returnStdout: true
-                    ).trim()
-
-                    echo "Changed files:\n${changedFiles}"
-
-                    // Check if any changed file is inside app folder
-                    def appChanged = changedFiles.contains("${params.APP_FOLDER}/") || 
-                                     changedFiles == 'first-commit'
-
-                    if (appChanged || params.FORCE_BUILD) {
-                        echo "✅ Changes detected in '${params.APP_FOLDER}/' — proceeding with build."
-                        env.SHOULD_BUILD = "true"
-                    } else {
-                        echo "⏭️  No changes in '${params.APP_FOLDER}/' folder — skipping build."
-                        env.SHOULD_BUILD = "false"
-                    }
-                }
+                echo "========================================="
+                echo "  Building from folder : ${params.FOLDER}/"
+                echo "  Docker Image         : ${IMAGE_URI}:${IMAGE_TAG}"
+                echo "========================================="
             }
         }
 
         // ─── 3. BUILD DOCKER IMAGE ────────────────────────────────────────────
         stage('Build Docker Image') {
-            when {
-                expression { env.SHOULD_BUILD == "true" }
-            }
             steps {
-                echo "Building Docker image from '${params.APP_FOLDER}/' folder..."
+                echo "Building Docker image from '${params.FOLDER}/' folder..."
                 sh """
-                    docker build -t ${IMAGE_URI}:${IMAGE_TAG} ./${params.APP_FOLDER}
+                    docker build -t ${IMAGE_URI}:${IMAGE_TAG} ./${params.FOLDER}
                     docker tag  ${IMAGE_URI}:${IMAGE_TAG} ${IMAGE_URI}:latest
                 """
             }
@@ -82,9 +56,6 @@ pipeline {
 
         // ─── 4. LOGIN TO AWS ECR ──────────────────────────────────────────────
         stage('Login to AWS ECR') {
-            when {
-                expression { env.SHOULD_BUILD == "true" }
-            }
             steps {
                 echo "Authenticating with AWS ECR..."
                 sh """
@@ -99,11 +70,8 @@ pipeline {
 
         // ─── 5. ENSURE ECR REPO EXISTS ────────────────────────────────────────
         stage('Ensure ECR Repository') {
-            when {
-                expression { env.SHOULD_BUILD == "true" }
-            }
             steps {
-                echo "Ensuring ECR repository exists..."
+                echo "Ensuring ECR repository '${ECR_REPO_NAME}' exists..."
                 sh """
                     export AWS_ACCESS_KEY_ID=${AWS_CREDENTIALS_USR}
                     export AWS_SECRET_ACCESS_KEY=${AWS_CREDENTIALS_PSW}
@@ -121,19 +89,12 @@ pipeline {
 
         // ─── 6. PUSH TO ECR ───────────────────────────────────────────────────
         stage('Push to AWS ECR') {
-            when {
-                allOf {
-                    expression { env.SHOULD_BUILD == "true" }
-                    anyOf {
-                        branch 'main'
-                        branch 'master'
-                        branch 'bhagyashil/devOps'
-                    }
-                }
-            }
             steps {
-                echo "Pushing image to ECR..."
+                echo "Pushing '${params.FOLDER}' image to ECR..."
                 sh """
+                    export AWS_ACCESS_KEY_ID=${AWS_CREDENTIALS_USR}
+                    export AWS_SECRET_ACCESS_KEY=${AWS_CREDENTIALS_PSW}
+
                     docker push ${IMAGE_URI}:${IMAGE_TAG}
                     docker push ${IMAGE_URI}:latest
                 """
@@ -144,18 +105,11 @@ pipeline {
     // ─── POST ACTIONS ─────────────────────────────────────────────────────────
     post {
         success {
-            script {
-                if (env.SHOULD_BUILD == "true") {
-                    echo "✅ Image pushed successfully!"
-                    echo "   URI : ${IMAGE_URI}:${IMAGE_TAG}"
-                    echo "   From: ${params.APP_FOLDER}/ folder"
-                } else {
-                    echo "⏭️  Build skipped — no changes in '${params.APP_FOLDER}/' folder."
-                }
-            }
+            echo "✅ '${params.FOLDER}' folder built and pushed successfully!"
+            echo "   Image URI : ${IMAGE_URI}:${IMAGE_TAG}"
         }
         failure {
-            echo "❌ Pipeline failed. Check logs above."
+            echo "❌ Pipeline failed for '${params.FOLDER}' folder. Check logs above."
         }
         always {
             sh """
