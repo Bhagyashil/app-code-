@@ -1,15 +1,28 @@
 pipeline {
     agent any
 
+    // ─── PARAMETERS ───────────────────────────────────────────────────────────
+    parameters {
+        string(
+            name: 'APP_FOLDER',
+            defaultValue: 'app',
+            description: 'Folder to build from (e.g. app)'
+        )
+        booleanParam(
+            name: 'FORCE_BUILD',
+            defaultValue: false,
+            description: 'Force build even if no changes in app folder'
+        )
+    }
+
     environment {
         // ── AWS CONFIG ─────────────────────────────────────────────────────────
-        // Add these in Jenkins → Manage Credentials → Add → AWS Credentials
         AWS_CREDENTIALS    = credentials('aws-credentials')
         AWS_REGION         = "us-east-1"                          // ← change to your region
-        AWS_ACCOUNT_ID     = "1204298492808"                       // ← your AWS account ID
+        AWS_ACCOUNT_ID     = "123456789012"                       // ← your AWS account ID
 
         // ── ECR CONFIG ─────────────────────────────────────────────────────────
-        ECR_REPO_NAME      = "bhagyashil/web"                      // ← your ECR repo name
+        ECR_REPO_NAME      = "your-app-name"                      // ← your ECR repo name
         ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         IMAGE_URI          = "${ECR_REGISTRY}/${ECR_REPO_NAME}"
         IMAGE_TAG          = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
@@ -25,19 +38,53 @@ pipeline {
             }
         }
 
-        // ─── 2. BUILD DOCKER IMAGE ────────────────────────────────────────────
-        stage('Build Docker Image') {
+        // ─── 2. CHECK IF APP FOLDER HAS CHANGES ──────────────────────────────
+        stage('Check App Folder Changes') {
             steps {
-                echo "Building Docker image: ${IMAGE_URI}:${IMAGE_TAG}"
+                script {
+                    echo "Checking for changes in '${params.APP_FOLDER}/' folder..."
+
+                    def changedFiles = sh(
+                        script: "git diff --name-only HEAD~1 HEAD || echo 'first-commit'",
+                        returnStdout: true
+                    ).trim()
+
+                    echo "Changed files:\n${changedFiles}"
+
+                    // Check if any changed file is inside app folder
+                    def appChanged = changedFiles.contains("${params.APP_FOLDER}/") || 
+                                     changedFiles == 'first-commit'
+
+                    if (appChanged || params.FORCE_BUILD) {
+                        echo "✅ Changes detected in '${params.APP_FOLDER}/' — proceeding with build."
+                        env.SHOULD_BUILD = "true"
+                    } else {
+                        echo "⏭️  No changes in '${params.APP_FOLDER}/' folder — skipping build."
+                        env.SHOULD_BUILD = "false"
+                    }
+                }
+            }
+        }
+
+        // ─── 3. BUILD DOCKER IMAGE ────────────────────────────────────────────
+        stage('Build Docker Image') {
+            when {
+                expression { env.SHOULD_BUILD == "true" }
+            }
+            steps {
+                echo "Building Docker image from '${params.APP_FOLDER}/' folder..."
                 sh """
-                    docker build -t ${IMAGE_URI}:${IMAGE_TAG} .
+                    docker build -t ${IMAGE_URI}:${IMAGE_TAG} ./${params.APP_FOLDER}
                     docker tag  ${IMAGE_URI}:${IMAGE_TAG} ${IMAGE_URI}:latest
                 """
             }
         }
 
-        // ─── 3. LOGIN TO AWS ECR ──────────────────────────────────────────────
+        // ─── 4. LOGIN TO AWS ECR ──────────────────────────────────────────────
         stage('Login to AWS ECR') {
+            when {
+                expression { env.SHOULD_BUILD == "true" }
+            }
             steps {
                 echo "Authenticating with AWS ECR..."
                 sh """
@@ -50,8 +97,11 @@ pipeline {
             }
         }
 
-        // ─── 4. CREATE ECR REPO IF NOT EXISTS ────────────────────────────────
+        // ─── 5. ENSURE ECR REPO EXISTS ────────────────────────────────────────
         stage('Ensure ECR Repository') {
+            when {
+                expression { env.SHOULD_BUILD == "true" }
+            }
             steps {
                 echo "Ensuring ECR repository exists..."
                 sh """
@@ -69,12 +119,16 @@ pipeline {
             }
         }
 
-        // ─── 5. PUSH TO ECR ───────────────────────────────────────────────────
+        // ─── 6. PUSH TO ECR ───────────────────────────────────────────────────
         stage('Push to AWS ECR') {
             when {
-                anyOf {
-                    branch 'main'
-                    branch 'master'
+                allOf {
+                    expression { env.SHOULD_BUILD == "true" }
+                    anyOf {
+                        branch 'main'
+                        branch 'master'
+                        branch 'bhagyashil/devOps'
+                    }
                 }
             }
             steps {
@@ -90,14 +144,20 @@ pipeline {
     // ─── POST ACTIONS ─────────────────────────────────────────────────────────
     post {
         success {
-            echo "✅ Image pushed successfully!"
-            echo "   URI: ${IMAGE_URI}:${IMAGE_TAG}"
+            script {
+                if (env.SHOULD_BUILD == "true") {
+                    echo "✅ Image pushed successfully!"
+                    echo "   URI : ${IMAGE_URI}:${IMAGE_TAG}"
+                    echo "   From: ${params.APP_FOLDER}/ folder"
+                } else {
+                    echo "⏭️  Build skipped — no changes in '${params.APP_FOLDER}/' folder."
+                }
+            }
         }
         failure {
             echo "❌ Pipeline failed. Check logs above."
         }
         always {
-            // Clean up local images to save disk space
             sh """
                 docker rmi ${IMAGE_URI}:${IMAGE_TAG} || true
                 docker rmi ${IMAGE_URI}:latest       || true
