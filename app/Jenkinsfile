@@ -1,0 +1,108 @@
+pipeline {
+    agent any
+
+    environment {
+        // ── AWS CONFIG ─────────────────────────────────────────────────────────
+        // Add these in Jenkins → Manage Credentials → Add → AWS Credentials
+        AWS_CREDENTIALS    = credentials('aws-credentials')
+        AWS_REGION         = "us-east-1"                          // ← change to your region
+        AWS_ACCOUNT_ID     = "1204298492808"                       // ← your AWS account ID
+
+        // ── ECR CONFIG ─────────────────────────────────────────────────────────
+        ECR_REPO_NAME      = "bhagyashil/web"                      // ← your ECR repo name
+        ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        IMAGE_URI          = "${ECR_REGISTRY}/${ECR_REPO_NAME}"
+        IMAGE_TAG          = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+    }
+
+    stages {
+
+        // ─── 1. CHECKOUT ──────────────────────────────────────────────────────
+        stage('Checkout') {
+            steps {
+                echo "Checking out code from GitHub..."
+                checkout scm
+            }
+        }
+
+        // ─── 2. BUILD DOCKER IMAGE ────────────────────────────────────────────
+        stage('Build Docker Image') {
+            steps {
+                echo "Building Docker image: ${IMAGE_URI}:${IMAGE_TAG}"
+                sh """
+                    docker build -t ${IMAGE_URI}:${IMAGE_TAG} .
+                    docker tag  ${IMAGE_URI}:${IMAGE_TAG} ${IMAGE_URI}:latest
+                """
+            }
+        }
+
+        // ─── 3. LOGIN TO AWS ECR ──────────────────────────────────────────────
+        stage('Login to AWS ECR') {
+            steps {
+                echo "Authenticating with AWS ECR..."
+                sh """
+                    export AWS_ACCESS_KEY_ID=${AWS_CREDENTIALS_USR}
+                    export AWS_SECRET_ACCESS_KEY=${AWS_CREDENTIALS_PSW}
+
+                    aws ecr get-login-password --region ${AWS_REGION} \
+                        | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                """
+            }
+        }
+
+        // ─── 4. CREATE ECR REPO IF NOT EXISTS ────────────────────────────────
+        stage('Ensure ECR Repository') {
+            steps {
+                echo "Ensuring ECR repository exists..."
+                sh """
+                    export AWS_ACCESS_KEY_ID=${AWS_CREDENTIALS_USR}
+                    export AWS_SECRET_ACCESS_KEY=${AWS_CREDENTIALS_PSW}
+
+                    aws ecr describe-repositories \
+                        --repository-names ${ECR_REPO_NAME} \
+                        --region ${AWS_REGION} \
+                    || aws ecr create-repository \
+                        --repository-name ${ECR_REPO_NAME} \
+                        --region ${AWS_REGION} \
+                        --image-scanning-configuration scanOnPush=true
+                """
+            }
+        }
+
+        // ─── 5. PUSH TO ECR ───────────────────────────────────────────────────
+        stage('Push to AWS ECR') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'master'
+                }
+            }
+            steps {
+                echo "Pushing image to ECR..."
+                sh """
+                    docker push ${IMAGE_URI}:${IMAGE_TAG}
+                    docker push ${IMAGE_URI}:latest
+                """
+            }
+        }
+    }
+
+    // ─── POST ACTIONS ─────────────────────────────────────────────────────────
+    post {
+        success {
+            echo "✅ Image pushed successfully!"
+            echo "   URI: ${IMAGE_URI}:${IMAGE_TAG}"
+        }
+        failure {
+            echo "❌ Pipeline failed. Check logs above."
+        }
+        always {
+            // Clean up local images to save disk space
+            sh """
+                docker rmi ${IMAGE_URI}:${IMAGE_TAG} || true
+                docker rmi ${IMAGE_URI}:latest       || true
+                docker image prune -f               || true
+            """
+        }
+    }
+}
