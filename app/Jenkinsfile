@@ -56,17 +56,21 @@ pipeline {
 
         // ─── 4. LOGIN TO AWS ECR ──────────────────────────────────────────────
         stage('Login to AWS ECR') {
-            steps {
-                echo "Authenticating with AWS ECR..."
-                sh """
-                    export AWS_ACCESS_KEY_ID=${AWS_CREDENTIALS_USR}
-                    export AWS_SECRET_ACCESS_KEY=${AWS_CREDENTIALS_PSW}
-
-                    aws ecr get-login-password --region ${AWS_REGION} \
-                        | docker login --username AWS --password-stdin ${ECR_REGISTRY}
-                """
-            }
+    steps {
+        withCredentials([[
+            $class: 'AmazonWebServicesCredentialsBinding',
+            credentialsId: 'aws-credential',        // ✅ Exact match from screenshot
+            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+            sh '''
+                aws ecr get-login-password --region us-east-1 | \
+                docker login --username AWS --password-stdin \
+                204298492808.dkr.ecr.us-east-1.amazonaws.com
+            '''
         }
+    }
+}
 
         // ─── 5. ENSURE ECR REPO EXISTS ────────────────────────────────────────
         stage('Ensure ECR Repository') {
