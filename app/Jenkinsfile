@@ -1,7 +1,6 @@
 pipeline {
     agent any
 
-    // ─── PARAMETERS ───────────────────────────────────────────────────────────
     parameters {
         choice(
             name: 'FOLDER',
@@ -11,21 +10,16 @@ pipeline {
     }
 
     environment {
-        // ── AWS CONFIG ─────────────────────────────────────────────────────────
-        AWS_CREDENTIALS    = credentials('aws-credential')
-        AWS_REGION         = "us-east-1"                          // ← change to your region
-        AWS_ACCOUNT_ID     = "204298492808"                       // ← your AWS account ID
-
-        // ── ECR CONFIG — image name will be based on selected folder ───────────
-        ECR_REPO_NAME      = "${params.FOLDER}-app"               // app-app or dev-app
-        ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        IMAGE_URI          = "${ECR_REGISTRY}/${ECR_REPO_NAME}"
-        IMAGE_TAG          = "${params.FOLDER}-${env.BUILD_NUMBER}"
+        AWS_REGION      = "us-east-1"
+        AWS_ACCOUNT_ID  = "204298492808"
+        ECR_REPO_NAME   = "${params.FOLDER}-app"
+        ECR_REGISTRY    = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        IMAGE_URI       = "${ECR_REGISTRY}/${ECR_REPO_NAME}"
+        IMAGE_TAG       = "${params.FOLDER}-${env.BUILD_NUMBER}"
     }
 
     stages {
 
-        // ─── 1. CHECKOUT ──────────────────────────────────────────────────────
         stage('Checkout') {
             steps {
                 echo "Checking out code from GitHub..."
@@ -33,7 +27,6 @@ pipeline {
             }
         }
 
-        // ─── 2. CONFIRM SELECTED FOLDER ───────────────────────────────────────
         stage('Selected Folder Info') {
             steps {
                 echo "========================================="
@@ -43,7 +36,6 @@ pipeline {
             }
         }
 
-        // ─── 3. BUILD DOCKER IMAGE ────────────────────────────────────────────
         stage('Build Docker Image') {
             steps {
                 echo "Building Docker image from '${params.FOLDER}/' folder..."
@@ -54,59 +46,63 @@ pipeline {
             }
         }
 
-        // ─── 4. LOGIN TO AWS ECR ──────────────────────────────────────────────
         stage('Login to AWS ECR') {
-    steps {
-        withCredentials([[
-            $class: 'AmazonWebServicesCredentialsBinding',
-            credentialsId: 'aws-credential',        // ✅ Exact match from screenshot
-            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-        ]]) {
-            sh '''
-                aws ecr get-login-password --region us-east-1 | \
-                docker login --username AWS --password-stdin \
-                204298492808.dkr.ecr.us-east-1.amazonaws.com
-            '''
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credential',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh '''
+                        aws ecr get-login-password --region us-east-1 | \
+                        docker login --username AWS --password-stdin \
+                        204298492808.dkr.ecr.us-east-1.amazonaws.com
+                    '''
+                }
+            }
         }
-    }
-}
 
-        // ─── 5. ENSURE ECR REPO EXISTS ────────────────────────────────────────
         stage('Ensure ECR Repository') {
             steps {
                 echo "Ensuring ECR repository '${ECR_REPO_NAME}' exists..."
-                sh """
-                    export AWS_ACCESS_KEY_ID=${AWS_CREDENTIALS_USR}
-                    export AWS_SECRET_ACCESS_KEY=${AWS_CREDENTIALS_PSW}
-
-                    aws ecr describe-repositories \
-                        --repository-names ${ECR_REPO_NAME} \
-                        --region ${AWS_REGION} \
-                    || aws ecr create-repository \
-                        --repository-name ${ECR_REPO_NAME} \
-                        --region ${AWS_REGION} \
-                        --image-scanning-configuration scanOnPush=true
-                """
+                withCredentials([[                          // ✅ FIXED
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credential',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh """
+                        aws ecr describe-repositories \
+                            --repository-names ${ECR_REPO_NAME} \
+                            --region ${AWS_REGION} \
+                        || aws ecr create-repository \
+                            --repository-name ${ECR_REPO_NAME} \
+                            --region ${AWS_REGION} \
+                            --image-scanning-configuration scanOnPush=true
+                    """
+                }
             }
         }
 
-        // ─── 6. PUSH TO ECR ───────────────────────────────────────────────────
         stage('Push to AWS ECR') {
             steps {
                 echo "Pushing '${params.FOLDER}' image to ECR..."
-                sh """
-                    export AWS_ACCESS_KEY_ID=${AWS_CREDENTIALS_USR}
-                    export AWS_SECRET_ACCESS_KEY=${AWS_CREDENTIALS_PSW}
-
-                    docker push ${IMAGE_URI}:${IMAGE_TAG}
-                    docker push ${IMAGE_URI}:latest
-                """
+                withCredentials([[                          // ✅ FIXED
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credential',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh """
+                        docker push ${IMAGE_URI}:${IMAGE_TAG}
+                        docker push ${IMAGE_URI}:latest
+                    """
+                }
             }
         }
     }
 
-    // ─── POST ACTIONS ─────────────────────────────────────────────────────────
     post {
         success {
             echo "✅ '${params.FOLDER}' folder built and pushed successfully!"
