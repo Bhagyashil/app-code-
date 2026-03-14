@@ -2,7 +2,7 @@
 // Project Structure:
 //   app/         → Python Flask application + Dockerfile
 //   dev/         → Terraform infrastructure code
-ppipeline {
+pipeline {
     agent any
 
     parameters {
