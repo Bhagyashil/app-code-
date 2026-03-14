@@ -2,13 +2,9 @@
 // Project Structure:
 //   app/         → Python Flask application + Dockerfile
 //   dev/         → Terraform infrastructure code
-pipeline {
+ppipeline {
     agent any
 
-    // ─────────────────────────────────────────
-    // PARAMETERS
-    // Choose Terraform action from Jenkins UI
-    // ─────────────────────────────────────────
     parameters {
         choice(
             name: 'TERRAFORM_ACTION',
@@ -28,9 +24,6 @@ pipeline {
 
     stages {
 
-        // ─────────────────────────────────────────
-        // STAGE 1: Checkout Code from GitLab
-        // ─────────────────────────────────────────
         stage('Checkout Code') {
             steps {
                 echo "========== Checking out code from GitLab =========="
@@ -39,10 +32,6 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // STAGE 2: ECR Login
-        // Skipped if Terraform destroy
-        // ─────────────────────────────────────────
         stage('ECR Login') {
             when {
                 expression { params.TERRAFORM_ACTION != 'destroy' }
@@ -50,7 +39,9 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                    credentialsId: 'aws-credential',       // ✅ FIXED
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh """
                         echo "========== Logging in to Amazon ECR =========="
@@ -62,10 +53,6 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // STAGE 3: Docker Build
-        // Skipped if Terraform destroy
-        // ─────────────────────────────────────────
         stage('Docker Build') {
             when {
                 expression { params.TERRAFORM_ACTION != 'destroy' }
@@ -81,10 +68,6 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // STAGE 4: Push to ECR
-        // Skipped if Terraform destroy
-        // ─────────────────────────────────────────
         stage('Push to ECR') {
             when {
                 expression { params.TERRAFORM_ACTION != 'destroy' }
@@ -92,7 +75,9 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                    credentialsId: 'aws-credential',       // ✅ FIXED
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh """
                         echo "========== Pushing Image to ECR =========="
@@ -104,15 +89,13 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // STAGE 5: Terraform Init
-        // Always runs for all actions
-        // ─────────────────────────────────────────
         stage('Terraform Init') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                    credentialsId: 'aws-credential',       // ✅ FIXED
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh """
                         echo "========== Terraform Init =========="
@@ -124,10 +107,6 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // STAGE 6: Terraform Plan
-        // Runs when action = plan OR apply
-        // ─────────────────────────────────────────
         stage('Terraform Plan') {
             when {
                 expression { params.TERRAFORM_ACTION == 'plan' || params.TERRAFORM_ACTION == 'apply' }
@@ -135,7 +114,9 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                    credentialsId: 'aws-credential',       // ✅ FIXED
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh """
                         echo "========== Terraform Plan =========="
@@ -150,10 +131,6 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // STAGE 7: Terraform Apply
-        // Runs only when action = apply
-        // ─────────────────────────────────────────
         stage('Terraform Apply') {
             when {
                 expression { params.TERRAFORM_ACTION == 'apply' }
@@ -161,7 +138,9 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                    credentialsId: 'aws-credential',       // ✅ FIXED
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh """
                         echo "========== Terraform Apply =========="
@@ -173,10 +152,6 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // STAGE 8: Terraform Destroy
-        // Runs only when action = destroy
-        // ─────────────────────────────────────────
         stage('Terraform Destroy') {
             when {
                 expression { params.TERRAFORM_ACTION == 'destroy' }
@@ -184,7 +159,9 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                    credentialsId: 'aws-credential',       // ✅ FIXED
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh """
                         echo "========== Terraform Destroy =========="
@@ -199,10 +176,6 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // STAGE 9: Deploy to ECS
-        // Runs only when action = apply
-        // ─────────────────────────────────────────
         stage('Deploy to ECS') {
             when {
                 expression { params.TERRAFORM_ACTION == 'apply' }
@@ -210,7 +183,9 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                    credentialsId: 'aws-credential',       // ✅ FIXED
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh """
                         echo "========== Deploying to ECS =========="
@@ -225,10 +200,6 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────
-        // STAGE 10: Cleanup
-        // Skipped if Terraform destroy
-        // ─────────────────────────────────────────
         stage('Cleanup') {
             when {
                 expression { params.TERRAFORM_ACTION != 'destroy' }
@@ -245,9 +216,6 @@ pipeline {
         }
     }
 
-    // ─────────────────────────────────────────
-    // POST ACTIONS
-    // ─────────────────────────────────────────
     post {
         success {
             echo """
@@ -274,3 +242,23 @@ pipeline {
         }
     }
 }
+
+
+---
+
+## Pre-Run Checklist:
+
+| Check | Status |
+|---|---|
+| Credential ID = `aws-credential` | ✅ Fix applied |
+| ECR repo `bhagyashil/web` exists | ⚠️ Verify in AWS Console |
+| `dev/variables.tf` has `ecr_image_uri` & `image_tag` | ⚠️ Verify in your code |
+| Terraform installed on Jenkins server | ⚠️ Run `terraform --version` |
+| ECS cluster `gitlab-ecs-cluster` exists | ⚠️ Verify in AWS Console |
+
+---
+
+## Run Order:
+
+First run  →  plan    ← safe, just shows what will be created
+Second run →  apply   ← creates infrastructure + deploys
