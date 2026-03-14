@@ -16,7 +16,7 @@ pipeline {
     environment {
         AWS_REGION     = "us-east-1"
         AWS_ACCOUNT_ID = "204298492808"
-        ECR_REPO_NAME  = "bhagyashil/web"
+        ECR_REPO_NAME  = "app-app"
         IMAGE_TAG      = "${env.BUILD_NUMBER}"
         ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         ECR_IMAGE_URI  = "${ECR_REGISTRY}/${ECR_REPO_NAME}"
@@ -244,21 +244,6 @@ pipeline {
 }
 
 
----
 
-## Pre-Run Checklist:
 
-| Check | Status |
-|---|---|
-| Credential ID = `aws-credential` | ✅ Fix applied |
-| ECR repo `bhagyashil/web` exists | ⚠️ Verify in AWS Console |
-| `dev/variables.tf` has `ecr_image_uri` & `image_tag` | ⚠️ Verify in your code |
-| Terraform installed on Jenkins server | ⚠️ Run `terraform --version` |
-| ECS cluster `gitlab-ecs-cluster` exists | ⚠️ Verify in AWS Console |
 
----
-
-## Run Order:
-
-First run  →  plan    ← safe, just shows what will be created
-Second run →  apply   ← creates infrastructure + deploys
